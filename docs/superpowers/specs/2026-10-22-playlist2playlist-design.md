@@ -37,9 +37,20 @@ could not be copied.
 - **No shared app.** Since 2025–2026, a Spotify app in Development Mode allows at most
   **5 authorized users**, one Development-Mode Client ID per developer, and requires Spotify
   Premium; Extended Quota is only granted to registered businesses with a large user base.
-  Therefore every user **brings their own Client ID**: they create an app in the Spotify
-  developer dashboard, add both of their accounts under *User Management*, register this
-  page's URL as Redirect URI, and paste the Client ID into the page.
+  Decision (owner, 2026-10-22): **users should not have to register as developers.**
+  Therefore:
+  - The deployed page ships with the **owner's Client ID** (build-time variable
+    `VITE_SPOTIFY_CLIENT_ID`, a GitHub Actions repository variable; a Client ID is public by
+    design in PKCE). Up to 5 accounts that the owner adds under *User Management* use the page
+    with no setup at all. A person moving old → new uses 2 of those 5 slots; the owner can
+    remove emails afterwards to free slots.
+  - **Bring your own Client ID** stays as a folded "Advanced" option for everyone else (and is
+    the only path when the build has no default Client ID, e.g. self-hosting).
+  - An account that is not on the allow-list gets `403` from `GET /me`; the page explains
+    it: "This account is not on the allow-list of this page. Ask the owner to add it, or use
+    your own Client ID (Advanced)".
+  - Rejected alternative: Spotify's private web-player API (no registration for anyone, but
+    breaks Spotify's terms, risks users' accounts and breaks often).
 - **February 2026 endpoint migration.** New Development-Mode apps get the new endpoints only.
   The tool uses exclusively:
 
@@ -157,7 +168,9 @@ present in the snapshot.
 
 - Authorization Code with PKCE (S256), no client secret, plain `fetch` to
   `https://accounts.spotify.com/authorize` and `/api/token`.
-- **Client ID**: pasted by the user, kept in `localStorage` (not a secret).
+- **Client ID**: the user's own one if they set it under Advanced (kept in `localStorage`;
+  not a secret), else `import.meta.env.VITE_SPOTIFY_CLIENT_ID`. With neither, the setup
+  screen is shown first.
 - **Redirect URI**: `location.origin + location.pathname` (normalised to end in `/`), shown
   on screen with a copy button. Dev server runs on `http://127.0.0.1:5173/`.
 - **Roles**: `source` and `destination`. `state` = `<role>.<random nonce>`; the verifier and
@@ -256,7 +269,7 @@ read, and reading + writing run back to back on one progress screen.
 
 | Step | Content |
 |---|---|
-| Setup (only once; Client ID remembered) | Numbered guide with direct link to `https://developer.spotify.com/dashboard/create`, copy buttons for app name, description and the exact Redirect URI, "Web API" checkbox reminder, reminder to add both e-mails under *User Management*; Client ID input validated as 32 hex chars |
+| Setup (skipped when the build has a default Client ID; otherwise shown once, then remembered; always reachable from "Advanced: use your own Client ID") | Numbered guide with direct link to `https://developer.spotify.com/dashboard/create`, copy buttons for app name, description and the exact Redirect URI, "Web API" checkbox reminder, reminder to add both e-mails under *User Management*; Client ID input validated as 32 hex chars |
 | 1 Old account | "Connect your old account" → shows name |
 | 2 New account | One line: "On Spotify's screen click *Not you?* and log in with the new account" (the authorize page always shows it because of `show_dialog=true`); fallback link "Still logged in as the old one? Log out here" opening `accounts.spotify.com/logout`. Same-account check |
 | 3 Transfer | Summary with counts fetched cheaply (`total` of the first page of each endpoint): "23 playlists, 7 followed, 1,842 liked songs, 96 albums, 310 artists". Big button **Transfer everything**. Folded "Customize" section with the five checkboxes and the per-playlist list. Pressing the button reads then writes with one progress bar per phase, Cancel, resume after reload |
@@ -287,7 +300,11 @@ Header: product name, language picker (EN/ES, initial from `navigator.language`)
 ## 12. Delivery
 
 - `pnpm build` → `dist/` with `base: "/playlist2playlist/"`.
-- GitHub Actions workflow: on push to `main`, install, lint, test, build, deploy to Pages.
+- GitHub Actions workflow: on push to `main`, install, lint, test, build (with the repository
+  variable `VITE_SPOTIFY_CLIENT_ID`), deploy to Pages.
+- One-time manual step for the owner (cannot be automated): create the Spotify app with
+  Redirect URIs `https://esdedev.github.io/playlist2playlist/` and
+  `http://127.0.0.1:5173/`, set the repository variable, add allowed accounts.
 - README (EN + ES section): what it does, privacy, setup of the Spotify app with the exact
   Redirect URI, limits (5 users, Premium, covers, order inside batches), self-hosting.
 - `LICENSE` AGPL-3.0, `.node-version` 24.
