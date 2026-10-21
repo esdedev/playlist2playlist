@@ -102,7 +102,7 @@ describe("spotify-api client", () => {
       { status: 503 },
       { status: 500, body: { error: { message: "boom" } } },
     ])
-    const err = await client.get("/me").catch((e) => e)
+    const err = (await client.get("/me").catch((e: unknown) => e)) as SpotifyApiError
     expect(err).toBeInstanceOf(SpotifyApiError)
     expect(err.status).toBe(500)
     expect(err.message).toContain("boom")
