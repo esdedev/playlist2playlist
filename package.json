@@ -39,5 +39,14 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "description": "Copy your Spotify playlists, liked songs, albums and artists to a new account. Runs entirely in your browser.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/esdedev/playlist2playlist.git"
   }
 }

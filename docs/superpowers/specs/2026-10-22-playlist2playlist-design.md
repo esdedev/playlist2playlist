@@ -172,7 +172,7 @@ present in the snapshot.
   not a secret), else `import.meta.env.VITE_SPOTIFY_CLIENT_ID`. With neither, the setup
   screen is shown first.
 - **Redirect URI**: `location.origin + location.pathname` (normalised to end in `/`), shown
-  on screen with a copy button. Dev server runs on `http://127.0.0.1:5173/`.
+  on screen with a copy button. Dev server runs on `http://127.0.0.1:5173/playlist2playlist/` (Vite `base`).
 - **Roles**: `source` and `destination`. `state` = `<role>.<random nonce>`; the verifier and
   nonce live in `sessionStorage` under the role. The callback validates the nonce, exchanges
   the code, removes `code`/`state` from the URL with `history.replaceState`, and resumes the
@@ -304,7 +304,7 @@ Header: product name, language picker (EN/ES, initial from `navigator.language`)
   variable `VITE_SPOTIFY_CLIENT_ID`), deploy to Pages.
 - One-time manual step for the owner (cannot be automated): create the Spotify app with
   Redirect URIs `https://esdedev.github.io/playlist2playlist/` and
-  `http://127.0.0.1:5173/`, set the repository variable, add allowed accounts.
+  `http://127.0.0.1:5173/playlist2playlist/`, set the repository variable, add allowed accounts.
 - README (EN + ES section): what it does, privacy, setup of the Spotify app with the exact
   Redirect URI, limits (5 users, Premium, covers, order inside batches), self-hosting.
 - `LICENSE` AGPL-3.0, `.node-version` 24.
