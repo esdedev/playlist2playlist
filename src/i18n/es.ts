@@ -66,7 +66,7 @@ export const es: Record<MessageKey, string> = {
   "done.reason.local": "Fichero local: añádelo desde la app de escritorio de Spotify",
   "done.reason.api-error": "Spotify lo rechazó",
   "done.unavailable":
-    "{n} canciones de tus playlists ya no están en Spotify y se han quedado fuera.",
+    "Canciones de tus playlists que ya no están en Spotify y se han quedado fuera: {n}.",
   "done.notCopiedEver":
     "No se pueden copiar: portadas de playlists, historial de escucha y recomendaciones.",
   "done.downloadReport": "Descargar informe",

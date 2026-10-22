@@ -63,8 +63,7 @@ export const en = {
   "done.skippedTitle": "Not copied ({n})",
   "done.reason.local": "Local file: add it from the Spotify desktop app",
   "done.reason.api-error": "Spotify rejected it",
-  "done.unavailable":
-    "{n} songs in your playlists are no longer available on Spotify and were left out.",
+  "done.unavailable": "Songs in your playlists that are no longer on Spotify, left out: {n}.",
   "done.notCopiedEver":
     "Not possible to copy: playlist covers, listening history and recommendations.",
   "done.downloadReport": "Download report",

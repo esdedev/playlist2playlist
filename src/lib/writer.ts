@@ -63,9 +63,9 @@ export async function writeLibrary(opts: WriteOptions): Promise<Report> {
   async function copyOwnedPlaylists(owned: SnapshotPlaylist[]) {
     const counts = report.counts.ownedPlaylists
     const me = await getMe(client)
-    const existingNames = new Set(
-      (await listPlaylists(client)).filter((p) => p.owner.id === me.id).map((p) => p.name),
-    )
+    const destinationOwned = (await listPlaylists(client)).filter((p) => p.owner.id === me.id)
+    const existingNames = new Set(destinationOwned.map((p) => p.name))
+    const existingIds = new Set(destinationOwned.map((p) => p.id))
     const total = owned.reduce((sum, p) => sum + p.items.length, 0)
     let done = 0
     emit("ownedPlaylists", 0, total)
@@ -76,6 +76,8 @@ export async function writeLibrary(opts: WriteOptions): Promise<Report> {
         if (isLocal(item.uri)) skip("ownedPlaylists", item.uri, "local", playlist.name)
 
       let state = progress.get(playlist.id)
+      // The user deleted the copy since: forget it and copy again.
+      if (state && !existingIds.has(state.destId)) state = undefined
       if (state && state.written >= addable.length) {
         counts.alreadyThere++
         done += playlist.items.length

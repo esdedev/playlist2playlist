@@ -330,6 +330,45 @@ describe("writeLibrary", () => {
     expect(second.counts.ownedPlaylists).toMatchObject({ created: 0, added: 150 })
   })
 
+  test("a copy the user deleted since the last run is copied again", async () => {
+    const snap = snapshot({
+      playlists: [
+        {
+          id: "src1",
+          name: "A",
+          description: "",
+          public: true,
+          collaborative: false,
+          owned: true,
+          items: tracks(3),
+        },
+      ],
+    })
+    const progress = memoryProgressStore()
+    await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress,
+    })
+    const first = [...fake.playlists.values()].find((p) => p.ownerId === "new")
+    const newUser = fake.users.get("new")
+    if (!first || !newUser) throw new Error("setup")
+    newUser.playlists = newUser.playlists.filter((id) => id !== first.id)
+    const second = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress,
+    })
+    expect(second.counts.ownedPlaylists).toEqual({
+      created: 1,
+      added: 3,
+      alreadyThere: 0,
+      skipped: 0,
+    })
+  })
+
   test("a rejected chunk is reported and the run continues", async () => {
     fake.intercept = (method, url) =>
       method === "PUT" && url.searchParams.get("uris")?.includes("spotify:album:bad") ? 400 : null

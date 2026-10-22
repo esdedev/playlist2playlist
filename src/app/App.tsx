@@ -17,7 +17,7 @@ import { Transfer } from "@/steps/Transfer"
 import type { Backend } from "./backend"
 import { AppContext, type AppContextValue } from "./context"
 import { Stepper } from "./Stepper"
-import { clearState, deriveScreen, loadState, reducer, saveState } from "./state"
+import { type Action, clearState, deriveScreen, loadState, reducer, saveState } from "./state"
 
 const REPO_URL = "https://github.com/esdedev/playlist2playlist"
 
@@ -25,6 +25,45 @@ export type AppProps = {
   backend: Backend | null
   /** Bumped by main.tsx when the Client ID changes so a new backend is built. */
   onClientIdChange: () => void
+}
+
+const loginResults = new WeakMap<Backend, Promise<Action | null>>()
+
+function finishLogin(backend: Backend): Promise<Action | null> {
+  let result = loginResults.get(backend)
+  if (!result) {
+    result = completeAndIdentify(backend)
+    loginResults.set(backend, result)
+  }
+  return result
+}
+
+async function completeAndIdentify(backend: Backend): Promise<Action | null> {
+  let role: "source" | "destination"
+  try {
+    const done = await backend.completeLogin()
+    if (!done) return null
+    role = done.role
+  } catch (err) {
+    const code = err instanceof AuthError && err.code === "denied" ? "denied" : "failed"
+    return { type: "error", error: { kind: "auth", code } }
+  }
+  try {
+    const me = await getMe(backend.client(role))
+    const source = loadState(sessionStorage).source
+    if (role === "destination" && source && source.id === me.id) {
+      backend.disconnect("destination")
+      return { type: "error", error: { kind: "same-account" } }
+    }
+    return { type: "connected", role, me }
+  } catch (err) {
+    backend.disconnect(role)
+    const allowlist = err instanceof SpotifyApiError && err.status === 403
+    return {
+      type: "error",
+      error: allowlist ? { kind: "allowlist" } : { kind: "auth", code: "failed" },
+    }
+  }
 }
 
 export function App({ backend, onClientIdChange }: AppProps) {
@@ -35,45 +74,13 @@ export function App({ backend, onClientIdChange }: AppProps) {
 
   useEffect(() => saveState(sessionStorage, state), [state])
 
-  // Finish an OAuth redirect, then identify the account that just connected.
+  // Finish an OAuth redirect, then identify the account that just connected. The work is
+  // memoised per backend: React may run this effect twice, and an OAuth code works once.
   useEffect(() => {
     if (!backend) return
-    let cancelled = false
-    ;(async () => {
-      let role: "source" | "destination"
-      try {
-        const done = await backend.completeLogin()
-        if (!done) return
-        role = done.role
-      } catch (err) {
-        if (cancelled) return
-        const code = err instanceof AuthError && err.code === "denied" ? "denied" : "failed"
-        dispatch({ type: "error", error: { kind: "auth", code } })
-        return
-      }
-      try {
-        const me = await getMe(backend.client(role))
-        if (cancelled) return
-        const source = loadState(sessionStorage).source
-        if (role === "destination" && source && source.id === me.id) {
-          backend.disconnect("destination")
-          dispatch({ type: "error", error: { kind: "same-account" } })
-          return
-        }
-        dispatch({ type: "connected", role, me })
-      } catch (err) {
-        if (cancelled) return
-        backend.disconnect(role)
-        const allowlist = err instanceof SpotifyApiError && err.status === 403
-        dispatch({
-          type: "error",
-          error: allowlist ? { kind: "allowlist" } : { kind: "auth", code: "failed" },
-        })
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
+    finishLogin(backend).then((action) => {
+      if (action) dispatch(action)
+    })
   }, [backend])
 
   // A token that disappeared (tab closed and restored, storage cleared) means "not connected".
