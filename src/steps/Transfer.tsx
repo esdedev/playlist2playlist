@@ -102,8 +102,21 @@ export function Transfer() {
     }
   }, [backend, mode, snapshot, dispatch])
 
+  // "Continue" on the report: start again straight away, no second click.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run once per request
+  useEffect(() => {
+    if (state.resumeRequested && backend && !runInFlight) void run()
+  }, [state.resumeRequested, backend])
+
   // Leaving the screen stops the run safely (after the request in flight).
-  useEffect(() => () => controller.current?.abort(), [])
+  // Deferred so React's development double-mount (unmount + immediate remount) does not stop it.
+  const pendingAbort = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (pendingAbort.current) clearTimeout(pendingAbort.current)
+    return () => {
+      pendingAbort.current = setTimeout(() => controller.current?.abort(), 0)
+    }
+  }, [])
 
   const onProgress = (p: ProgressEvent) => {
     setWaiting(null)

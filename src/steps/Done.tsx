@@ -89,7 +89,11 @@ export function Done() {
       </CardHeader>
       <CardContent className="space-y-5">
         {report.aborted && (
-          <Button size="lg" className="w-full" onClick={() => dispatch({ type: "clearReport" })}>
+          <Button
+            size="lg"
+            className="w-full"
+            onClick={() => dispatch({ type: "clearReport", resume: true })}
+          >
             <RotateCcw />
             {t("transfer.continue")}
           </Button>

@@ -18,6 +18,8 @@ export type AppState = {
   selection: Selection
   /** True while a transfer runs; still true after a reload means it was interrupted. */
   running: boolean
+  /** "Continue" was pressed on the report: the transfer screen starts again by itself. */
+  resumeRequested: boolean
   report: Report | null
   error: AppError | null
 }
@@ -28,6 +30,7 @@ export const initialState: AppState = {
   destination: null,
   selection: ALL_SELECTED,
   running: false,
+  resumeRequested: false,
   report: null,
   error: null,
 }
@@ -41,7 +44,7 @@ export type Action =
   | { type: "runFinished"; report: Report | null }
   | { type: "runFailed"; message: string }
   | { type: "error"; error: AppError | null }
-  | { type: "clearReport" }
+  | { type: "clearReport"; resume?: boolean }
   | { type: "reset" }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -60,7 +63,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "selection":
       return { ...state, selection: action.selection }
     case "runStarted":
-      return { ...state, running: true, report: null, error: null }
+      return { ...state, running: true, resumeRequested: false, report: null, error: null }
     case "runFinished":
       return { ...state, running: false, report: action.report }
     case "runFailed":
@@ -68,7 +71,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "error":
       return { ...state, error: action.error }
     case "clearReport":
-      return { ...state, report: null, error: null }
+      return { ...state, report: null, error: null, resumeRequested: action.resume === true }
     case "reset":
       return {
         ...initialState,

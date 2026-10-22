@@ -64,6 +64,13 @@ describe("persistence", () => {
     expect(loaded.error).toBeNull()
   })
 
+  test("continue from the report asks the transfer screen to start by itself, once", () => {
+    let s = reducer(initialState, { type: "clearReport", resume: true })
+    expect(s.resumeRequested).toBe(true)
+    s = reducer(s, { type: "runStarted" })
+    expect(s.resumeRequested).toBe(false)
+  })
+
   test("changing mode keeps connected accounts but clears the run", () => {
     let s = reducer(initialState, { type: "connected", role: "source", me: old })
     s = reducer(s, { type: "runFailed", message: "x" })
