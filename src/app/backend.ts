@@ -10,6 +10,12 @@ import {
 import type { Role } from "@/lib/pkce"
 import { createClient, type SpotifyClient } from "@/lib/spotify-api"
 
+export type ClientExtras = {
+  /** Aborts reads only; writes are stopped cooperatively by the writer. */
+  signal?: AbortSignal
+  onWait?: (seconds: number) => void
+}
+
 /** What the UI needs from "Spotify", real or demo. */
 export type Backend = {
   kind: "real" | "demo"
@@ -17,7 +23,7 @@ export type Backend = {
   connect(role: Role): Promise<void>
   /** Finishes an OAuth redirect if the current URL is one. */
   completeLogin(): Promise<{ role: Role } | null>
-  client(role: Role, signal?: AbortSignal): SpotifyClient
+  client(role: Role, opts?: ClientExtras): SpotifyClient
   isConnected(role: Role): boolean
   disconnect(role: Role): void
   disconnectAll(): void
@@ -36,10 +42,11 @@ export function realBackend(deps: AuthDeps): Backend {
       window.history.replaceState(null, "", window.location.pathname)
       return handleCallback(deps, params)
     },
-    client(role, signal) {
+    client(role, extras) {
       return createClient({
         getToken: (opts) => getAccessToken(deps, role, opts),
-        ...(signal ? { signal } : {}),
+        ...(extras?.signal ? { signal: extras.signal } : {}),
+        ...(extras?.onWait ? { onWait: extras.onWait } : {}),
       })
     },
     isConnected: (role) => hasToken(deps.session, role),

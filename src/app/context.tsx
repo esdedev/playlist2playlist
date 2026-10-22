@@ -11,6 +11,9 @@ export type AppContextValue = {
   snapshot: Snapshot | null
   setSnapshot: (snapshot: Snapshot | null) => void
   openSetup: () => void
+  /** A transfer is running in this page: navigation that would unmount it is hidden. */
+  busy: boolean
+  setBusy: (busy: boolean) => void
   disconnectAll: () => void
 }
 

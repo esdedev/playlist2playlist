@@ -79,8 +79,11 @@ export function Done() {
         </CardTitle>
         {report.aborted && (
           <CardDescription>
-            {report.error ? `${t("transfer.failed", { error: report.error })} ` : ""}
-            {t("done.abortedBody")}
+            {report.errorKind === "rate-limit"
+              ? t("done.rateLimited", {
+                  n: Math.max(1, Math.ceil((report.retryAfterSeconds ?? 60) / 60)),
+                })
+              : `${report.error ? `${t("transfer.failed", { error: report.error })} ` : ""}${t("done.abortedBody")}`}
           </CardDescription>
         )}
       </CardHeader>

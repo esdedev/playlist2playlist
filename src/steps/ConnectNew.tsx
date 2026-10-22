@@ -34,7 +34,12 @@ export function ConnectNew() {
           onClick={async () => {
             setBusy(true)
             dispatch({ type: "error", error: null })
-            await backend?.connect("destination")
+            try {
+              await backend?.connect("destination")
+            } catch {
+              setBusy(false)
+              dispatch({ type: "error", error: { kind: "auth", code: "failed" } })
+            }
           }}
         >
           <LogIn />

@@ -7,7 +7,7 @@ import { useI18n } from "@/i18n"
 import { ErrorAlert } from "./shared"
 
 export function ConnectOld() {
-  const { backend } = useApp()
+  const { backend, dispatch } = useApp()
   const { t } = useI18n()
   const [busy, setBusy] = useState(false)
   return (
@@ -24,7 +24,12 @@ export function ConnectOld() {
           disabled={busy || !backend}
           onClick={async () => {
             setBusy(true)
-            await backend?.connect("source")
+            try {
+              await backend?.connect("source")
+            } catch {
+              setBusy(false)
+              dispatch({ type: "error", error: { kind: "auth", code: "failed" } })
+            }
           }}
         >
           <LogIn />

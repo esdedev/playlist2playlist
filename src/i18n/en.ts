@@ -42,6 +42,10 @@ export const en = {
   "transfer.failed": "Something went wrong: {error}",
   "transfer.retry": "Try again (nothing is duplicated)",
   "transfer.nothing": "Nothing selected.",
+  "transfer.waiting": "Spotify asked us to slow down. Waiting {n} s…",
+  "transfer.stopping": "Stopping after the current step…",
+  "transfer.sameAccountFile":
+    "This backup comes from the account you connected as the new one. Connect a different account.",
 
   "phase.ownedPlaylists": "Your playlists",
   "phase.followedPlaylists": "Playlists you follow",
@@ -54,6 +58,8 @@ export const en = {
 
   "done.title": "All done",
   "done.titleAborted": "Stopped before the end",
+  "done.rateLimited":
+    "Spotify asked to pause for about {n} minutes. Come back then and press Continue; nothing is duplicated.",
   "done.abortedBody":
     "Everything copied so far is kept. Press Continue to finish; nothing is duplicated.",
   "done.created": "{n} created",
@@ -88,6 +94,8 @@ export const en = {
     "Spotify only lets 5 accounts use a free app. Ask the owner of this page to add your account's e-mail, or use your own Client ID.",
   "auth.denied": "You cancelled the Spotify login.",
   "auth.failed": "Spotify login failed. Try again.",
+  "auth.expired":
+    "Your Spotify session expired. Connect the account again; the transfer continues where it stopped.",
 
   "setup.title": "Use your own Spotify Client ID",
   "setup.intro":

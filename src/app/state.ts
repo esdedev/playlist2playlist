@@ -8,7 +8,7 @@ export type Screen = "setup" | "import" | "old" | "new" | "transfer" | "done"
 export type AppError =
   | { kind: "allowlist" }
   | { kind: "same-account" }
-  | { kind: "auth"; code: "denied" | "failed" }
+  | { kind: "auth"; code: "denied" | "failed" | "expired" }
   | { kind: "run"; message: string }
 
 export type AppState = {

@@ -44,6 +44,10 @@ export const es: Record<MessageKey, string> = {
   "transfer.failed": "Algo ha fallado: {error}",
   "transfer.retry": "Reintentar (no se duplica nada)",
   "transfer.nothing": "No hay nada elegido.",
+  "transfer.waiting": "Spotify nos pide ir más despacio. Esperando {n} s…",
+  "transfer.stopping": "Parando al terminar el paso actual…",
+  "transfer.sameAccountFile":
+    "Esta copia es de la misma cuenta que has conectado como nueva. Conecta otra cuenta.",
 
   "phase.ownedPlaylists": "Tus playlists",
   "phase.followedPlaylists": "Playlists que sigues",
@@ -56,6 +60,8 @@ export const es: Record<MessageKey, string> = {
 
   "done.title": "Listo",
   "done.titleAborted": "Se paró antes de acabar",
+  "done.rateLimited":
+    "Spotify pide una pausa de unos {n} minutos. Vuelve entonces y pulsa Continuar; no se duplica nada.",
   "done.abortedBody":
     "Lo copiado hasta ahora se queda. Pulsa Continuar para terminar; no se duplica nada.",
   "done.created": "{n} creadas",
@@ -92,6 +98,8 @@ export const es: Record<MessageKey, string> = {
     "Spotify solo deja que 5 cuentas usen una app gratuita. Pide al dueño de esta página que añada el email de tu cuenta, o usa tu propio Client ID.",
   "auth.denied": "Has cancelado el inicio de sesión en Spotify.",
   "auth.failed": "No se pudo iniciar sesión en Spotify. Inténtalo otra vez.",
+  "auth.expired":
+    "Tu sesión de Spotify ha caducado. Vuelve a conectar la cuenta; la transferencia sigue donde se quedó.",
 
   "setup.title": "Usa tu propio Client ID de Spotify",
   "setup.intro":

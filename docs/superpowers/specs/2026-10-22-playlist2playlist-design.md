@@ -308,3 +308,30 @@ Header: product name, language picker (EN/ES, initial from `navigator.language`)
 - README (EN + ES section): what it does, privacy, setup of the Spotify app with the exact
   Redirect URI, limits (5 users, Premium, covers, order inside batches), self-hosting.
 - `LICENSE` AGPL-3.0, `.node-version` 24.
+
+## 13. Changes after the independent code review (2026-10-22)
+
+- **Backup validation**: ids must be base62 (`[0-9A-Za-z]+`, regex literals only). A
+  template-string regex had turned `\s` into `s` and rejected most real backups; commas are
+  rejected so a crafted file cannot inject URIs into a `uris=` query.
+- **POST is never retried blindly** on 5xx or network errors (it may have been applied); the
+  error is marked `uncertain` and stops the run. 429 is still retried (Spotify rejected it).
+- **Resume trusts Spotify**: for a playlist mapped in the progress store, `written` is
+  recomputed as the destination playlist's `total` plus the items Spotify rejected. A create
+  whose answer was lost leaves a `{ destId: null }` marker; the next run adopts the unmapped
+  destination playlist with that name instead of treating it as pre-existing.
+- **Progress store lives in localStorage** (supersedes §7: it holds no secrets, only account
+  and playlist ids and counts) and is not wiped by "Disconnect both accounts", so resume works
+  after closing the tab. Tokens stay session-only.
+- **Bisecting**: a 4xx on a batch is split in halves down to single URIs, so one forbidden
+  playlist or track never skips its 39 or 99 neighbours.
+- **Cooperative cancel**: Cancel aborts reads, but writes stop between requests, never inside
+  one. Leaving the screen does the same. One run per page; footer navigation is hidden while
+  a run is active.
+- **Stops the user can act on**: an expired or revoked session disconnects that role and
+  returns to its connect step (progress kept); a Retry-After above 60 s stops with "come back
+  in N minutes"; shorter waits are shown. Retry-After as an HTTP date is understood.
+- **Same account** is checked in both directions, and an imported backup cannot be written
+  into the account it came from.
+- **CSP** `<meta>` in the production build: `connect-src` limited to the two Spotify origins.
+- A playlist Spotify refuses because of its description is created without it.

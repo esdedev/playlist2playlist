@@ -8,11 +8,13 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Progress } from "@/components/ui/progress"
 import { useI18n } from "@/i18n"
+import { AuthError } from "@/lib/auth"
 import { dateStamp, downloadJson } from "@/lib/download"
 import { createProgressStore } from "@/lib/progress-store"
 import { type Counts, readCounts, readLibrary } from "@/lib/reader"
 import { emptyReport, PHASES, type Phase, type Progress as ProgressEvent } from "@/lib/report"
 import { type Selection, type Snapshot, serializeSnapshot } from "@/lib/snapshot"
+import { RateLimitedError, SpotifyApiError } from "@/lib/spotify-api"
 import { writeLibrary } from "@/lib/writer"
 import { AccountLine, ErrorAlert } from "./shared"
 
@@ -42,6 +44,10 @@ function countsFromSnapshot(s: Snapshot): Counts {
   }
 }
 
+function isAuthFailure(err: unknown): boolean {
+  return err instanceof AuthError || (err instanceof SpotifyApiError && err.status === 401)
+}
+
 export function backupFilename(snapshot: Snapshot): string {
   const who =
     snapshot.source.displayName.replace(/[^\p{L}\p{N}_-]+/gu, "-").slice(0, 40) || "spotify"
@@ -54,15 +60,25 @@ type Live = {
   label?: string
 }
 
+/** One transfer per page at a time, even if this component unmounts and remounts. */
+let runInFlight: Promise<void> | null = null
+
 export function Transfer() {
-  const { state, dispatch, backend, snapshot, setSnapshot } = useApp()
+  const { state, dispatch, backend, snapshot, setSnapshot, busy, setBusy } = useApp()
   const { t, n } = useI18n()
   const [counts, setCounts] = useState<Counts | null>(null)
   const [countsError, setCountsError] = useState<string | null>(null)
   const [live, setLive] = useState<Live | null>(null)
+  const [waiting, setWaiting] = useState<number | null>(null)
+  const [stopping, setStopping] = useState(false)
   const controller = useRef<AbortController | null>(null)
   const { mode, selection } = state
-  const interrupted = state.running && live === null
+  const interrupted = state.running && live === null && !busy
+  const sameAccountFile =
+    mode === "import" &&
+    snapshot !== null &&
+    state.destination !== null &&
+    snapshot.source.userId === state.destination.id
 
   useEffect(() => {
     if (mode === "import") {
@@ -73,16 +89,24 @@ export function Transfer() {
     let cancelled = false
     readCounts(backend.client("source"))
       .then((c) => !cancelled && setCounts(c))
-      .catch(
-        (err: unknown) =>
-          !cancelled && setCountsError(err instanceof Error ? err.message : String(err)),
-      )
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (isAuthFailure(err)) {
+          backend.disconnect("source")
+          dispatch({ type: "disconnected", role: "source" })
+          dispatch({ type: "error", error: { kind: "auth", code: "expired" } })
+        } else setCountsError(err instanceof Error ? err.message : String(err))
+      })
     return () => {
       cancelled = true
     }
-  }, [backend, mode, snapshot])
+  }, [backend, mode, snapshot, dispatch])
 
-  const onProgress = (p: ProgressEvent) =>
+  // Leaving the screen stops the run safely (after the request in flight).
+  useEffect(() => () => controller.current?.abort(), [])
+
+  const onProgress = (p: ProgressEvent) => {
+    setWaiting(null)
     setLive((prev) => {
       const phases = prev && prev.stage === p.stage ? prev.phases : {}
       return {
@@ -91,21 +115,25 @@ export function Transfer() {
         ...(p.label === undefined ? {} : { label: p.label }),
       }
     })
+  }
 
-  async function run() {
-    if (!backend) return
-    const ctl = new AbortController()
-    controller.current = ctl
-    dispatch({ type: "runStarted" })
-    setLive({ stage: mode === "import" ? "write" : "read", phases: {} })
+  function reconnect(role: "source" | "destination") {
+    backend?.disconnect(role)
+    dispatch({ type: "runFinished", report: null })
+    dispatch({ type: "disconnected", role })
+    dispatch({ type: "error", error: { kind: "auth", code: "expired" } })
+  }
+
+  async function execute(b: NonNullable<typeof backend>, ctl: AbortController) {
+    const onWait = (seconds: number) => setWaiting(seconds)
+    let snap: Snapshot
+    let unavailable = 0
     try {
-      let snap: Snapshot
-      let unavailable = 0
       if (mode === "import" && snapshot) {
         snap = snapshot
       } else {
         const result = await readLibrary(
-          backend.client("source", ctl.signal),
+          b.client("source", { signal: ctl.signal, onWait }),
           selection,
           onProgress,
         )
@@ -113,32 +141,67 @@ export function Transfer() {
         unavailable = result.unavailable
         setSnapshot(snap)
       }
-      if (mode === "export") {
-        downloadJson(backupFilename(snap), serializeSnapshot(snap))
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        dispatch({ type: "runFinished", report: null })
+      } else if (isAuthFailure(err)) {
+        reconnect("source")
+      } else if (err instanceof RateLimitedError) {
         dispatch({
           type: "runFinished",
-          report: { ...emptyReport(), finishedAt: new Date().toISOString() },
+          report: {
+            ...emptyReport(),
+            aborted: true,
+            errorKind: "rate-limit",
+            retryAfterSeconds: err.retryAfterSeconds,
+            finishedAt: new Date().toISOString(),
+          },
         })
-        return
-      }
-      if (!state.destination) return
-      const report = await writeLibrary({
-        client: backend.client("destination", ctl.signal),
-        snapshot: snap,
-        selection,
-        progress: createProgressStore(sessionStorage, snap.source.userId, state.destination.id),
-        onProgress,
-      })
-      report.unavailableOnRead = unavailable
-      dispatch({ type: "runFinished", report })
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError")
-        dispatch({ type: "runFinished", report: null })
-      else
+      } else {
         dispatch({ type: "runFailed", message: err instanceof Error ? err.message : String(err) })
+      }
+      return
+    }
+    if (mode === "export") {
+      downloadJson(backupFilename(snap), serializeSnapshot(snap))
+      dispatch({
+        type: "runFinished",
+        report: { ...emptyReport(), finishedAt: new Date().toISOString() },
+      })
+      return
+    }
+    if (!state.destination) return
+    const report = await writeLibrary({
+      // No abort signal for writes: Cancel stops between requests, never inside one.
+      client: b.client("destination", { onWait }),
+      snapshot: snap,
+      selection,
+      progress: createProgressStore(localStorage, snap.source.userId, state.destination.id),
+      onProgress,
+      stop: ctl.signal,
+    })
+    report.unavailableOnRead = unavailable
+    if (report.errorKind === "auth") reconnect("destination")
+    else dispatch({ type: "runFinished", report })
+  }
+
+  async function run() {
+    if (!backend || runInFlight) return
+    const ctl = new AbortController()
+    controller.current = ctl
+    setBusy(true)
+    setStopping(false)
+    dispatch({ type: "runStarted" })
+    setLive({ stage: mode === "import" ? "write" : "read", phases: {} })
+    runInFlight = execute(backend, ctl)
+    try {
+      await runInFlight
     } finally {
+      runInFlight = null
       controller.current = null
+      setBusy(false)
       setLive(null)
+      setWaiting(null)
     }
   }
 
@@ -188,6 +251,11 @@ export function Transfer() {
             <AlertDescription>{t("transfer.failed", { error: countsError })}</AlertDescription>
           </Alert>
         )}
+        {sameAccountFile && (
+          <Alert variant="destructive">
+            <AlertDescription>{t("transfer.sameAccountFile")}</AlertDescription>
+          </Alert>
+        )}
         {interrupted && (
           <Alert>
             <AlertDescription>{t("transfer.interrupted")}</AlertDescription>
@@ -222,7 +290,9 @@ export function Transfer() {
             <Button
               size="lg"
               className="h-12 w-full text-base"
-              disabled={!backend || nothingSelected || (!counts && !countsError)}
+              disabled={
+                !backend || busy || sameAccountFile || nothingSelected || (!counts && !countsError)
+              }
               onClick={run}
             >
               {mode === "export" ? <Download /> : <ArrowRightLeft />}
@@ -346,8 +416,22 @@ export function Transfer() {
               })}
             </ul>
             {live.label && <p className="truncate text-muted-foreground text-xs">{live.label}</p>}
-            <p className="text-muted-foreground text-sm">{t("transfer.running")}</p>
-            <Button variant="outline" onClick={() => controller.current?.abort()}>
+            {waiting !== null && (
+              <p className="text-muted-foreground text-sm">
+                {t("transfer.waiting", { n: waiting })}
+              </p>
+            )}
+            <p className="text-muted-foreground text-sm">
+              {stopping ? t("transfer.stopping") : t("transfer.running")}
+            </p>
+            <Button
+              variant="outline"
+              disabled={stopping}
+              onClick={() => {
+                setStopping(true)
+                controller.current?.abort()
+              }}
+            >
               {t("transfer.cancel")}
             </Button>
           </div>

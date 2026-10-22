@@ -31,12 +31,13 @@ export function demoBackend(session: Storage): Backend {
       window.history.replaceState(null, "", url.toString())
       return { role }
     },
-    client(role, signal) {
+    client(role, extras) {
       const user = session.getItem(key(role)) ?? (role === "source" ? "old" : "new")
       return createClient({
         fetch: slowFetch,
         getToken: async () => `token-${user}`,
-        ...(signal ? { signal } : {}),
+        ...(extras?.signal ? { signal: extras.signal } : {}),
+        ...(extras?.onWait ? { onWait: extras.onWait } : {}),
       })
     },
     isConnected: (role) => session.getItem(key(role)) !== null,

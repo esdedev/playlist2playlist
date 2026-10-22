@@ -29,7 +29,13 @@ export function ErrorAlert() {
     error.kind === "same-account"
       ? t("new.sameAccount")
       : error.kind === "auth"
-        ? t(error.code === "denied" ? "auth.denied" : "auth.failed")
+        ? t(
+            error.code === "denied"
+              ? "auth.denied"
+              : error.code === "expired"
+                ? "auth.expired"
+                : "auth.failed",
+          )
         : t("transfer.failed", { error: error.message })
   return (
     <Alert variant="destructive" className="mb-4">

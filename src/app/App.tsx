@@ -1,5 +1,5 @@
 import { Languages } from "lucide-react"
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useReducer, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useI18n } from "@/i18n"
@@ -50,9 +50,11 @@ async function completeAndIdentify(backend: Backend): Promise<Action | null> {
   }
   try {
     const me = await getMe(backend.client(role))
-    const source = loadState(sessionStorage).source
-    if (role === "destination" && source && source.id === me.id) {
-      backend.disconnect("destination")
+    // Whichever account connected second, it must not be the other one.
+    const saved = loadState(sessionStorage)
+    const other = role === "destination" ? saved.source : saved.destination
+    if (other && other.id === me.id) {
+      backend.disconnect(role)
       return { type: "error", error: { kind: "same-account" } }
     }
     return { type: "connected", role, me }
@@ -71,6 +73,7 @@ export function App({ backend, onClientIdChange }: AppProps) {
   const [state, dispatch] = useReducer(reducer, sessionStorage, loadState)
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [setupOpen, setSetupOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => saveState(sessionStorage, state), [state])
 
@@ -96,8 +99,8 @@ export function App({ backend, onClientIdChange }: AppProps) {
   const disconnectAll = useCallback(() => {
     backend?.disconnectAll()
     clearState(sessionStorage)
-    for (const key of Object.keys(sessionStorage))
-      if (key.startsWith("p2p.progress.")) sessionStorage.removeItem(key)
+    // Transfer progress (p2p.progress.* in localStorage) is kept on purpose: it holds no
+    // secrets and is what lets a later run resume without duplicating.
     setSnapshot(null)
     dispatch({ type: "disconnected", role: "source" })
     dispatch({ type: "disconnected", role: "destination" })
@@ -112,9 +115,11 @@ export function App({ backend, onClientIdChange }: AppProps) {
       snapshot,
       setSnapshot,
       openSetup: () => setSetupOpen(true),
+      busy,
+      setBusy,
       disconnectAll,
     }),
-    [state, backend, snapshot, disconnectAll],
+    [state, backend, snapshot, busy, disconnectAll],
   )
 
   const needsSetup = setupOpen || !backend
@@ -175,54 +180,45 @@ export function App({ backend, onClientIdChange }: AppProps) {
 
         <footer className="mt-10 space-y-3 border-t pt-4 text-muted-foreground text-sm">
           <p>{t("footer.privacy")}</p>
-          <nav className="flex flex-wrap gap-x-4 gap-y-2">
-            {state.mode !== "export" && (
-              <button
-                type="button"
-                className="underline-offset-4 hover:underline"
-                onClick={() => dispatch({ type: "setMode", mode: "export" })}
-              >
-                {t("footer.exportOnly")}
-              </button>
-            )}
-            {state.mode !== "import" && (
-              <button
-                type="button"
-                className="underline-offset-4 hover:underline"
-                onClick={() => dispatch({ type: "setMode", mode: "import" })}
-              >
-                {t("footer.import")}
-              </button>
-            )}
-            {state.mode !== "transfer" && (
-              <button
-                type="button"
-                className="underline-offset-4 hover:underline"
-                onClick={() => dispatch({ type: "setMode", mode: "transfer" })}
-              >
-                {t("transfer.button")}
-              </button>
-            )}
-            {backend?.kind !== "demo" && (
-              <button
-                type="button"
-                className="underline-offset-4 hover:underline"
-                onClick={() => setSetupOpen(true)}
-              >
-                {t("footer.ownClientId")}
-              </button>
-            )}
-            <a
-              className="underline-offset-4 hover:underline"
-              href={REPO_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t("footer.source")}
-            </a>
-          </nav>
+          {!busy && (
+            <nav className="-ml-2 flex flex-wrap gap-x-1 gap-y-1">
+              {state.mode !== "export" && (
+                <FooterLink onClick={() => dispatch({ type: "setMode", mode: "export" })}>
+                  {t("footer.exportOnly")}
+                </FooterLink>
+              )}
+              {state.mode !== "import" && (
+                <FooterLink onClick={() => dispatch({ type: "setMode", mode: "import" })}>
+                  {t("footer.import")}
+                </FooterLink>
+              )}
+              {state.mode !== "transfer" && (
+                <FooterLink onClick={() => dispatch({ type: "setMode", mode: "transfer" })}>
+                  {t("transfer.button")}
+                </FooterLink>
+              )}
+              {backend?.kind !== "demo" && (
+                <FooterLink onClick={() => setSetupOpen(true)}>
+                  {t("footer.ownClientId")}
+                </FooterLink>
+              )}
+              <Button variant="link" size="sm" className="text-muted-foreground" asChild>
+                <a href={REPO_URL} target="_blank" rel="noreferrer">
+                  {t("footer.source")}
+                </a>
+              </Button>
+            </nav>
+          )}
         </footer>
       </div>
     </AppContext.Provider>
+  )
+}
+
+function FooterLink({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <Button variant="link" size="sm" className="text-muted-foreground" onClick={onClick}>
+      {children}
+    </Button>
   )
 }
