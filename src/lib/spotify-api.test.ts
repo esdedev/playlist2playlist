@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest"
-import { createClient, SpotifyApiError } from "./spotify-api"
+import { createClient, RateLimitedError, SpotifyApiError } from "./spotify-api"
 
 type Reply = { status: number; body?: unknown; headers?: Record<string, string> } | Error
 
@@ -22,6 +22,7 @@ function fakeFetch(replies: Reply[]) {
 function setup(replies: Reply[], tokens = ["t1", "t2"]) {
   const f = fakeFetch(replies)
   const sleeps: number[] = []
+  const waits: number[] = []
   const getToken = vi.fn(async (opts?: { forceRefresh?: boolean }) =>
     opts?.forceRefresh ? (tokens[1] ?? "t?") : (tokens[0] ?? "t?"),
   )
@@ -31,8 +32,9 @@ function setup(replies: Reply[], tokens = ["t1", "t2"]) {
     sleep: async (ms) => {
       sleeps.push(ms)
     },
+    onWait: (seconds) => waits.push(seconds),
   })
-  return { client, calls: f.calls, sleeps, getToken }
+  return { client, calls: f.calls, sleeps, waits, getToken }
 }
 
 describe("spotify-api client", () => {
@@ -82,7 +84,7 @@ describe("spotify-api client", () => {
       { items: [1, 2], total: 3 },
       { items: [3], total: 3 },
     ])
-    expect(calls[1]?.url).toBe("https://api.spotify.com/v1/me/following?after=2")
+    expect(calls[1]?.url).toBe("https://api.spotify.com/v1/me/following?after=2&type=artist")
   })
 
   test("429 waits Retry-After plus one second, then retries", async () => {
@@ -143,5 +145,81 @@ describe("spotify-api client", () => {
     })
     await expect(client.get("/me")).rejects.toMatchObject({ name: "AbortError" })
     expect(f.calls).toHaveLength(0)
+  })
+
+  test("a POST that fails with 5xx is not retried: Spotify may have applied it", async () => {
+    const { client, sleeps, calls } = setup([{ status: 502 }, { status: 201, body: {} }])
+    const err = (await client
+      .post("/playlists/x/items", { uris: ["spotify:track:a"] })
+      .catch((e: unknown) => e)) as SpotifyApiError
+    expect(err).toBeInstanceOf(SpotifyApiError)
+    expect(err.uncertain).toBe(true)
+    expect(calls).toHaveLength(1)
+    expect(sleeps).toEqual([])
+  })
+
+  test("a POST that fails on the network is not retried either", async () => {
+    const { client, calls } = setup([new TypeError("reset"), { status: 201, body: {} }])
+    await expect(client.post("/me/playlists", { name: "x" })).rejects.toMatchObject({
+      status: 0,
+      uncertain: true,
+    })
+    expect(calls).toHaveLength(1)
+  })
+
+  test("a POST answered 429 is retried: Spotify rejected it before doing anything", async () => {
+    const { client, calls } = setup([
+      { status: 429, headers: { "Retry-After": "1" } },
+      { status: 201, body: { id: "p" } },
+    ])
+    expect(await client.post("/me/playlists", { name: "x" })).toEqual({ id: "p" })
+    expect(calls).toHaveLength(2)
+  })
+
+  test("short waits are announced", async () => {
+    const { client, waits } = setup([
+      { status: 429, headers: { "Retry-After": "7" } },
+      { status: 200, body: {} },
+    ])
+    await client.get("/me")
+    expect(waits).toEqual([8])
+  })
+
+  test("a long Retry-After stops with a resumable rate-limit error instead of sleeping", async () => {
+    const { client, sleeps } = setup([{ status: 429, headers: { "Retry-After": "3600" } }])
+    const err = (await client.get("/me").catch((e: unknown) => e)) as RateLimitedError
+    expect(err).toBeInstanceOf(RateLimitedError)
+    expect(err.retryAfterSeconds).toBe(3600)
+    expect(sleeps).toEqual([])
+  })
+
+  test("Retry-After as an HTTP date is understood", async () => {
+    const inTenSeconds = new Date(Date.now() + 10_000).toUTCString()
+    const { client, sleeps } = setup([
+      { status: 429, headers: { "Retry-After": inTenSeconds } },
+      { status: 200, body: {} },
+    ])
+    await client.get("/me")
+    expect(sleeps[0]).toBeGreaterThanOrEqual(9000)
+    expect(sleeps[0]).toBeLessThanOrEqual(12000)
+  })
+
+  test("paginate keeps query parameters that a next link dropped", async () => {
+    const { client, calls } = setup([
+      {
+        status: 200,
+        body: { items: [1], total: 2, next: "https://api.spotify.com/v1/playlists/p/items?offset=1&limit=50" },
+      },
+      { status: 200, body: { items: [2], total: 2, next: null } },
+    ])
+    for await (const _ of client.paginate("/playlists/p/items", {
+      limit: 50,
+      additional_types: "track,episode",
+    })) {
+      // drain
+    }
+    const second = new URL(calls[1]?.url ?? "")
+    expect(second.searchParams.get("additional_types")).toBe("track,episode")
+    expect(second.searchParams.get("offset")).toBe("1")
   })
 })

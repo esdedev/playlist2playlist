@@ -1,16 +1,41 @@
 const BASE = "https://api.spotify.com/v1"
 const MAX_ATTEMPTS = 5
 const BACKOFF_MS = [1000, 2000, 4000, 8000]
+/** Waits longer than this stop the run (resumable) instead of freezing the page. */
+const MAX_WAIT_SECONDS = 60
 
 export class SpotifyApiError extends Error {
   readonly status: number
   readonly body: unknown
-  constructor(status: number, message: string, body: unknown) {
+  /** True when the request may have been applied (a POST whose answer was lost or 5xx). */
+  readonly uncertain: boolean
+  constructor(status: number, message: string, body: unknown, uncertain = false) {
     super(message)
     this.name = "SpotifyApiError"
     this.status = status
     this.body = body
+    this.uncertain = uncertain
   }
+}
+
+/** Spotify asked to wait longer than we are willing to keep the page busy. */
+export class RateLimitedError extends SpotifyApiError {
+  readonly retryAfterSeconds: number
+  constructor(retryAfterSeconds: number, body: unknown) {
+    super(429, `Spotify rate limit: retry in ${retryAfterSeconds} s`, body)
+    this.name = "RateLimitedError"
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
+/** Retry-After is either delta-seconds or an HTTP date. */
+export function parseRetryAfter(value: string | null, now = Date.now()): number {
+  if (!value) return 5
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds)
+  const date = Date.parse(value)
+  if (Number.isFinite(date)) return Math.max(0, Math.ceil((date - now) / 1000))
+  return 5
 }
 
 export type GetToken = (opts?: { forceRefresh?: boolean }) => Promise<string>
@@ -30,6 +55,8 @@ export type ClientOptions = {
   fetch?: typeof fetch
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   signal?: AbortSignal
+  /** Called before waiting for a rate limit, with the seconds about to be waited. */
+  onWait?: (seconds: number) => void
 }
 
 export function abortError(): Error {
@@ -55,6 +82,15 @@ function buildUrl(path: string, query?: Query): string {
   const url = new URL(path.startsWith("https://") ? path : `${BASE}${path}`)
   for (const [k, v] of Object.entries(query ?? {}))
     if (v !== undefined) url.searchParams.set(k, String(v))
+  return url.toString()
+}
+
+/** Spotify's `next` links do not always repeat every parameter (e.g. additional_types). */
+function withMissingParams(next: string, query?: Query): string {
+  const url = new URL(next)
+  for (const [k, v] of Object.entries(query ?? {})) {
+    if (v !== undefined && !url.searchParams.has(k)) url.searchParams.set(k, String(v))
+  }
   return url.toString()
 }
 
@@ -111,8 +147,10 @@ export function createClient(opts: ClientOptions): SpotifyClient {
       } catch (err) {
         if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError"))
           throw abortError()
-        if (attempt >= MAX_ATTEMPTS)
-          throw new SpotifyApiError(0, `Network error: ${String(err)}`, null)
+        // A POST is not idempotent: it may have reached Spotify. Let the caller reconcile.
+        if (method === "POST" || attempt >= MAX_ATTEMPTS) {
+          throw new SpotifyApiError(0, `Network error: ${String(err)}`, null, method === "POST")
+        }
         await sleep(BACKOFF_MS[attempt - 1] ?? 8000, signal)
         continue
       }
@@ -125,9 +163,14 @@ export function createClient(opts: ClientOptions): SpotifyClient {
         continue
       }
       if (res.status === 429 && attempt < MAX_ATTEMPTS) {
-        const seconds = Number(res.headers.get("Retry-After"))
-        await sleep(((Number.isFinite(seconds) && seconds > 0 ? seconds : 5) + 1) * 1000, signal)
+        const seconds = parseRetryAfter(res.headers.get("Retry-After"))
+        if (seconds > MAX_WAIT_SECONDS) throw new RateLimitedError(seconds, resBody)
+        opts.onWait?.(seconds + 1)
+        await sleep((seconds + 1) * 1000, signal)
         continue
+      }
+      if (res.status >= 500 && method === "POST") {
+        throw new SpotifyApiError(res.status, apiMessage(res.status, resBody), resBody, true)
       }
       if (res.status >= 500 && attempt < MAX_ATTEMPTS) {
         await sleep(BACKOFF_MS[attempt - 1] ?? 8000, signal)
@@ -147,7 +190,7 @@ export function createClient(opts: ClientOptions): SpotifyClient {
         const res: Record<string, unknown> = await request("GET", next)
         const page = (key ? res[key] : res) as { items: T[]; total?: number; next: string | null }
         yield { items: page.items, total: page.total ?? page.items.length }
-        next = page.next
+        next = page.next ? withMissingParams(page.next, query) : null
       }
     },
   }
