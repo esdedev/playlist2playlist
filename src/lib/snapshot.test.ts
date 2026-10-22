@@ -7,21 +7,21 @@ const valid: Snapshot = {
   source: { userId: "old", displayName: "Old me" },
   playlists: [
     {
-      id: "p1",
+      id: "37i9dQZF1DXcBWIGoYBM5M",
       name: "Running",
       description: "",
       public: false,
       collaborative: false,
       owned: true,
       items: [
-        { uri: "spotify:track:a", addedAt: "2020-01-01T00:00:00Z" },
-        { uri: "spotify:local:x:y:z:1", addedAt: null },
+        { uri: "spotify:track:5sICkBXVmaCQk5aISGR3x1", addedAt: "2020-01-01T00:00:00Z" },
+        { uri: "spotify:local:The+Artist:Some+Album:Song%2C+live:180", addedAt: null },
       ],
     },
   ],
-  likedTracks: [{ uri: "spotify:track:b", addedAt: "2021-01-01T00:00:00Z" }],
-  savedAlbums: [{ uri: "spotify:album:c", addedAt: "2022-01-01T00:00:00Z" }],
-  followedArtists: [{ uri: "spotify:artist:d" }],
+  likedTracks: [{ uri: "spotify:track:3n3Ppam7vgaVa1iaRUc9Lp", addedAt: "2021-01-01T00:00:00Z" }],
+  savedAlbums: [{ uri: "spotify:album:4aawyAB9vmqN3uQ7FjRGTy", addedAt: "2022-01-01T00:00:00Z" }],
+  followedArtists: [{ uri: "spotify:artist:0OdUWJ0sBjDrqHygGUXeCF" }],
 }
 
 describe("snapshot", () => {
@@ -39,6 +39,31 @@ describe("snapshot", () => {
   test("rejects a wrong shape", () => {
     const result = parseSnapshot(JSON.stringify({ ...valid, likedTracks: [{ uri: 3 }] }))
     expect(result).toEqual({ ok: false, reason: "invalid" })
+  })
+  test("accepts real ids containing any base62 character", () => {
+    const ids = ["5sICkBXVmaCQk5aISGR3x1", "ssssssssssssssssssssss", "0123456789ABCDEFGHIJKa"]
+    for (const id of ids) {
+      const result = parseSnapshot(
+        JSON.stringify({ ...valid, likedTracks: [{ uri: `spotify:track:${id}`, addedAt: null }] }),
+      )
+      expect(result.ok).toBe(true)
+    }
+  })
+  test("rejects ids that could inject extra URIs into a comma-separated query", () => {
+    const injected = parseSnapshot(
+      JSON.stringify({
+        ...valid,
+        followedArtists: [{ uri: "spotify:artist:abc,spotify:track:x" }],
+      }),
+    )
+    expect(injected).toEqual({ ok: false, reason: "invalid" })
+    const badPlaylistId = parseSnapshot(
+      JSON.stringify({
+        ...valid,
+        playlists: [{ ...valid.playlists[0], id: "x,spotify:track:y" }],
+      }),
+    )
+    expect(badPlaylistId).toEqual({ ok: false, reason: "invalid" })
   })
   test("rejects a URI that is not a spotify URI", () => {
     const result = parseSnapshot(

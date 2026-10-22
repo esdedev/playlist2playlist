@@ -70,7 +70,7 @@ function seed(): FakeSpotify {
     name: "Sunday morning",
     items: [
       ...Array.from({ length: 35 }, (_, i) => track(200 + i)),
-      { uri: "spotify:local:Me:Demo:Voice memo:61", addedAt: at(), isLocal: true },
+      { uri: "spotify:local:Me:Demo:Voice+memo:61", addedAt: at(), isLocal: true },
       { uri: "spotify:track:gone", addedAt: at(), unavailable: true },
     ],
   })

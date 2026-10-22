@@ -3,7 +3,7 @@ import { FakeSpotify } from "@/test/fake-spotify"
 import { memoryProgressStore } from "./progress-store"
 import { readLibrary } from "./reader"
 import type { Progress } from "./report"
-import { ALL_SELECTED, type Snapshot } from "./snapshot"
+import { ALL_SELECTED, parseSnapshot, type Snapshot, serializeSnapshot } from "./snapshot"
 import { createClient } from "./spotify-api"
 import { writeLibrary } from "./writer"
 
@@ -437,7 +437,11 @@ describe("reader → writer round trip", () => {
     old?.albums.push({ uri: "spotify:album:a", addedAt: "2020-01-01T00:00:00Z" })
     old?.artists.push("spotify:artist:x", "spotify:artist:y")
 
-    const { snapshot: snap } = await readLibrary(clientFor("old"), ALL_SELECTED)
+    const { snapshot: read } = await readLibrary(clientFor("old"), ALL_SELECTED)
+    // Through the backup file format, as export → import does.
+    const parsed = parseSnapshot(serializeSnapshot(read))
+    if (!parsed.ok) throw new Error(`backup rejected: ${parsed.reason}`)
+    const snap = parsed.snapshot
     const report = await writeLibrary({
       client: clientFor("new"),
       snapshot: snap,

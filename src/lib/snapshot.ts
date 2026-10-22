@@ -1,13 +1,23 @@
 import { z } from "zod"
 
-const spotifyUri = (kind: string) =>
-  z.string().regex(new RegExp(`^spotify:${kind}:[^s]+$`), `expected a spotify:${kind}: URI`)
+/** Spotify ids are base62. Anything else (commas especially) could smuggle extra URIs into
+ * the comma-separated `uris` query parameter, so it is rejected. */
+// Regex literals on purpose: inside a template string "\s" silently becomes "s".
+const spotifyId = z.string().regex(/^[0-9A-Za-z]+$/)
+const URI_PATTERNS = {
+  track: /^spotify:track:[0-9A-Za-z]+$/,
+  album: /^spotify:album:[0-9A-Za-z]+$/,
+  artist: /^spotify:artist:[0-9A-Za-z]+$/,
+} as const
+const spotifyUri = (kind: keyof typeof URI_PATTERNS) =>
+  z.string().regex(URI_PATTERNS[kind], `expected a spotify:${kind}: URI`)
 
-const itemUri = z.string().regex(/^spotify:(track|episode|local):[^\s]+$/)
+/** Local files keep Spotify's URL-encoded form; they are never sent back to the API. */
+const itemUri = z.string().regex(/^(spotify:(track|episode):[0-9A-Za-z]+|spotify:local:[^\s,]+)$/)
 const isoOrNull = z.string().nullable()
 
 const PlaylistSchema = z.object({
-  id: z.string().min(1),
+  id: spotifyId,
   name: z.string(),
   description: z.string(),
   public: z.boolean(),
