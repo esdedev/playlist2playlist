@@ -34,6 +34,9 @@ export type Report = {
   finishedAt: string
   aborted: boolean
   error?: string
+  /** Why it stopped: the UI reconnects on "auth" and says when to come back on "rate-limit". */
+  errorKind?: "auth" | "rate-limit" | "other"
+  retryAfterSeconds?: number
 }
 
 export function emptyReport(): Report {

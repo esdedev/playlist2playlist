@@ -26,7 +26,7 @@ export type FakeUser = {
   /** Playlist ids in "Your Library" order (own and followed). */
   playlists: string[]
   /** Oldest first, as stored; the API returns them newest first. */
-  liked: { uri: string; addedAt: string }[]
+  liked: { uri: string; addedAt: string; unavailable?: boolean }[]
   albums: { uri: string; addedAt: string }[]
   artists: string[]
 }
@@ -43,6 +43,13 @@ export class FakeSpotify {
   readonly log: string[] = []
   /** Return a status for a request instead of handling it (e.g. inject a 400). */
   intercept: ((method: string, url: URL, body: unknown) => number | null) | null = null
+  /**
+   * Runs AFTER the request was applied: return a status to replace the real answer, or 0 to
+   * simulate a lost response (the change happened but the client sees a network error).
+   */
+  interceptAfter: ((method: string, url: URL, body: unknown) => number | null) | null = null
+  /** URIs a Development-Mode app may not save or follow (e.g. Spotify-owned editorial playlists). */
+  readonly restricted = new Set<string>()
   private clock = Date.parse("2026-01-01T00:00:00Z")
   private seq = 0
 
@@ -79,6 +86,21 @@ export class FakeSpotify {
 
   /** A fetch implementation bound to this fake. */
   readonly fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const res = await this.handle(input, init)
+    const url = new URL(String(input))
+    const method = (init?.method ?? "GET").toUpperCase()
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined
+    const after = this.interceptAfter?.(method, url, body)
+    if (after === 0) throw new TypeError("Failed to fetch (simulated lost response)")
+    if (after) {
+      return new Response(JSON.stringify({ error: { status: after, message: "injected after" } }), {
+        status: after,
+      })
+    }
+    return res
+  }) as typeof fetch
+
+  private readonly handle = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
     const auth = new Headers(init?.headers).get("Authorization") ?? ""
@@ -152,7 +174,7 @@ export class FakeSpotify {
     if (method === "GET" && path === "/me/tracks") {
       const all = [...me.liked]
         .reverse()
-        .map((t) => ({ added_at: t.addedAt, track: { uri: t.uri } }))
+        .map((t) => ({ added_at: t.addedAt, track: t.unavailable ? null : { uri: t.uri } }))
       const p = page(all, 50)
       return p ? respond(200, p) : error(400, "Invalid limit")
     }
@@ -209,6 +231,7 @@ export class FakeSpotify {
       if (uris.some((u) => !/^spotify:(track|album|artist|playlist):[^:]+$/.test(u))) {
         return error(400, "Unsupported URI")
       }
+      if (uris.some((u) => this.restricted.has(u))) return error(403, "Forbidden for this app")
       if (method === "GET" && path === "/me/library/contains")
         return respond(
           200,

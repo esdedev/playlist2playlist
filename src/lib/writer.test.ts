@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import { FakeSpotify } from "@/test/fake-spotify"
+import { AuthError } from "./auth"
 import { memoryProgressStore } from "./progress-store"
 import { readLibrary } from "./reader"
 import type { Progress } from "./report"
@@ -421,6 +422,213 @@ describe("writeLibrary", () => {
     })
     expect(fake.users.get("new")?.liked).toEqual([])
     expect(fake.users.get("new")?.artists).toEqual(["spotify:artist:x"])
+  })
+})
+
+describe("writeLibrary under failures found in review", () => {
+  const owned = (n: number, name = "Big") =>
+    snapshot({
+      playlists: [
+        {
+          id: "src1",
+          name,
+          description: "",
+          public: true,
+          collaborative: false,
+          owned: true,
+          items: tracks(n),
+        },
+      ],
+    })
+  const destPlaylists = () => [...fake.playlists.values()].filter((p) => p.ownerId === "new")
+
+  test("a lost answer to an items POST that Spotify applied does not duplicate on resume", async () => {
+    const snap = owned(250)
+    const progress = memoryProgressStore()
+    let posts = 0
+    fake.interceptAfter = (method, url) =>
+      method === "POST" && url.pathname.endsWith("/items") && ++posts === 2 ? 0 : null
+    const first = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress,
+    })
+    expect(first.aborted).toBe(true)
+    expect(destPlaylists()[0]?.items).toHaveLength(200)
+
+    fake.interceptAfter = null
+    const second = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress,
+    })
+    expect(second.aborted).toBe(false)
+    expect(destPlaylists()[0]?.items.map((i) => i.uri)).toEqual(tracks(250).map((t) => t.uri))
+  })
+
+  test("a lost answer to the create POST adopts the playlist instead of leaving it empty", async () => {
+    const snap = owned(30, "Gym")
+    const progress = memoryProgressStore()
+    fake.interceptAfter = (method, url) =>
+      method === "POST" && url.pathname === "/v1/me/playlists" ? 0 : null
+    const first = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress,
+    })
+    expect(first.aborted).toBe(true)
+    expect(destPlaylists()).toHaveLength(1)
+
+    fake.interceptAfter = null
+    const second = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress,
+    })
+    expect(destPlaylists()).toHaveLength(1)
+    expect(destPlaylists()[0]?.items).toHaveLength(30)
+    expect(second.counts.ownedPlaylists).toMatchObject({ added: 30, alreadyThere: 0 })
+  })
+
+  test("one forbidden playlist does not take the other 39 of its chunk down with it", async () => {
+    const ids = Array.from(
+      { length: 5 },
+      (_, i) => fake.addPlaylist("friend", { id: `f${i}`, name: `F${i}` }).id,
+    )
+    fake.restricted.add("spotify:playlist:f2")
+    const snap = snapshot({
+      playlists: ids.map((id) => ({
+        id,
+        name: id,
+        description: "",
+        public: true,
+        collaborative: false,
+        owned: false,
+        items: [],
+      })),
+    })
+    const report = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress: memoryProgressStore(),
+    })
+    expect(fake.users.get("new")?.playlists.sort()).toEqual(["f0", "f1", "f3", "f4"])
+    expect(report.skipped).toEqual([
+      { phase: "followedPlaylists", uri: "spotify:playlist:f2", reason: "api-error" },
+    ])
+    expect(report.counts.followedPlaylists).toMatchObject({ added: 4, skipped: 1 })
+  })
+
+  test("one rejected track does not take the other 99 of its chunk down with it", async () => {
+    fake.intercept = (method, _url, body) =>
+      method === "POST" && (body as { uris?: string[] })?.uris?.includes("spotify:track:t42")
+        ? 400
+        : null
+    const report = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: owned(100),
+      selection: ALL_SELECTED,
+      progress: memoryProgressStore(),
+    })
+    expect(destPlaylists()[0]?.items).toHaveLength(99)
+    expect(report.skipped).toEqual([
+      { phase: "ownedPlaylists", playlist: "Big", uri: "spotify:track:t42", reason: "api-error" },
+    ])
+  })
+
+  test("a description Spotify rejects does not lose the playlist", async () => {
+    fake.intercept = (method, url, body) =>
+      method === "POST" &&
+      url.pathname === "/v1/me/playlists" &&
+      (body as { description?: string }).description
+        ? 400
+        : null
+    const snap = snapshot({
+      playlists: [
+        {
+          id: "src1",
+          name: "Desc",
+          description: "x".repeat(400),
+          public: true,
+          collaborative: false,
+          owned: true,
+          items: tracks(2),
+        },
+      ],
+    })
+    const report = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress: memoryProgressStore(),
+    })
+    expect(destPlaylists()[0]?.items).toHaveLength(2)
+    expect(report.counts.ownedPlaylists).toMatchObject({ created: 1, added: 2 })
+  })
+
+  test("stop is cooperative: it never cuts a write in half and resume is exact", async () => {
+    const stop = new AbortController()
+    const progress = memoryProgressStore()
+    const snap = owned(250)
+    const first = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress,
+      stop: stop.signal,
+      onProgress: (p) => {
+        if (p.phase === "ownedPlaylists" && p.done >= 100) stop.abort()
+      },
+    })
+    expect(first.aborted).toBe(true)
+    expect(first.error).toBeUndefined()
+    expect(destPlaylists()[0]?.items).toHaveLength(100)
+    const second = await writeLibrary({
+      client: clientFor("new"),
+      snapshot: snap,
+      selection: ALL_SELECTED,
+      progress,
+    })
+    expect(destPlaylists()[0]?.items).toHaveLength(250)
+    expect(second.counts.ownedPlaylists.added).toBe(150)
+  })
+
+  test("an expired session is reported as an auth problem", async () => {
+    const client = createClient({
+      fetch: fake.fetch,
+      getToken: async () => {
+        throw new AuthError("refresh-failed", "destination")
+      },
+    })
+    const report = await writeLibrary({
+      client,
+      snapshot: owned(1),
+      selection: ALL_SELECTED,
+      progress: memoryProgressStore(),
+    })
+    expect(report).toMatchObject({ aborted: true, errorKind: "auth" })
+  })
+
+  test("a long rate limit is reported with the wait so the user can come back", async () => {
+    const limited = (async () =>
+      new Response("{}", { status: 429, headers: { "Retry-After": "7200" } })) as typeof fetch
+    const client = createClient({ fetch: limited, getToken: async () => "token-new" })
+    const report = await writeLibrary({
+      client,
+      snapshot: owned(1),
+      selection: ALL_SELECTED,
+      progress: memoryProgressStore(),
+    })
+    expect(report).toMatchObject({
+      aborted: true,
+      errorKind: "rate-limit",
+      retryAfterSeconds: 7200,
+    })
   })
 })
 

@@ -208,7 +208,11 @@ describe("spotify-api client", () => {
     const { client, calls } = setup([
       {
         status: 200,
-        body: { items: [1], total: 2, next: "https://api.spotify.com/v1/playlists/p/items?offset=1&limit=50" },
+        body: {
+          items: [1],
+          total: 2,
+          next: "https://api.spotify.com/v1/playlists/p/items?offset=1&limit=50",
+        },
       },
       { status: 200, body: { items: [2], total: 2, next: null } },
     ])

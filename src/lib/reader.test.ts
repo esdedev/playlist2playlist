@@ -148,6 +148,17 @@ describe("readLibrary", () => {
   })
 })
 
+test("a liked song Spotify returns empty is counted as unavailable, not a crash", async () => {
+  const user = fake.users.get("old")
+  user?.liked.push(
+    { uri: "spotify:track:ok", addedAt: "2020-01-01T00:00:00Z" },
+    { uri: "spotify:track:gone", addedAt: "2020-01-02T00:00:00Z", unavailable: true },
+  )
+  const { snapshot, unavailable } = await readLibrary(clientFor("old"), ALL_SELECTED)
+  expect(snapshot.likedTracks.map((t) => t.uri)).toEqual(["spotify:track:ok"])
+  expect(unavailable).toBe(1)
+})
+
 describe("readCounts", () => {
   test("counts each category and lists playlists", async () => {
     fake.addPlaylist("old", {

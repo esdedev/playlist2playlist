@@ -16,7 +16,7 @@ export type ApiPlaylist = {
   tracks?: { total: number }
 }
 type ApiPlaylistEntry = { added_at: string | null; is_local: boolean; item: { uri: string } | null }
-type ApiSaved<K extends string> = { added_at: string } & Record<K, { uri: string }>
+type ApiSaved<K extends string> = { added_at: string } & Record<K, { uri: string } | null>
 
 export type Me = { id: string; displayName: string }
 
@@ -140,7 +140,11 @@ export async function readLibrary(
   async function readSaved<K extends "track" | "album">(phase: Phase, path: string, key: K) {
     const out: { uri: string; addedAt: string | null }[] = []
     for await (const page of client.paginate<ApiSaved<K>>(path, { limit: 50 })) {
-      for (const entry of page.items) out.push({ uri: entry[key].uri, addedAt: entry.added_at })
+      for (const entry of page.items) {
+        const saved = entry?.[key]
+        if (saved?.uri) out.push({ uri: saved.uri, addedAt: entry.added_at })
+        else unavailable++
+      }
       emit(phase, out.length, page.total)
     }
     if (out.length === 0) emit(phase, 0, 0)
